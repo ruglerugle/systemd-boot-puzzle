@@ -180,6 +180,33 @@
     font-size: 12.5px;
   }
   .glossaryBtn:hover { background: #233834; }
+  #cmdBar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  #cmdInput {
+    flex: 1;
+    background: #0a0b10;
+    border: 1px solid #3a3f54;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 13px;
+    color: var(--text);
+  }
+  #cmdInput:focus { outline: none; border-color: var(--accent); }
+  #hint {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-top: -4px;
+    margin-bottom: 12px;
+  }
+  .badge.enabled-tag {
+    background: #20232f;
+    color: #8fa8d6;
+    margin-left: 4px;
+  }
   .card .infoIcon {
     cursor: pointer;
     float: right;
@@ -215,16 +242,26 @@
     </p>
     <table>
       <tr><th>依存の種類</th><th>意味</th></tr>
-      <tr><td><code>Requires</code></td><td>このunitが動くには、依存先unitが必ず起動済みでなければならない</td></tr>
-      <tr><td><code>After</code></td><td>依存先unitの後に起動する、という順序だけの指定</td></tr>
+      <tr><td><code>Requires</code>（硬い依存）</td><td>依存先unitが起動済みでなければ、このunitは起動できない（失敗する）</td></tr>
+      <tr><td><code>Wants</code>（柔らかい依存）</td><td>依存先unitも一緒に起動しようとするが、依存先が無くても・失敗していても自分は起動を続ける</td></tr>
+      <tr><td><code>After</code></td><td>依存先unitの後に起動する、という順序だけの指定（成功/失敗は問わない）</td></tr>
     </table>
     <p>
-      このゲームでは依存先が <b>active（起動済み）</b> になっていないunitを起動しようとすると <b>failed（失敗）</b> になる。
-      これは実際のLinuxでも起きる現象で、<code>systemctl status ユニット名</code> や <code>journalctl -u ユニット名</code> で原因を調べる。
-      下のログ表示は journalctl の出力を模したものだ。
+      このゲームでは <code>Requires</code> の依存先が <b>active</b> になっていないunitを起動しようとすると <b>failed</b> になる。
+      一方 <code>Wants</code> の依存先が無くても、本体のunitは起動に成功する（ただし警告ログが出る）。これが実際のsystemdでの大きな違いだ。
     </p>
     <p>
-      ゴールは依存関係を正しい順番で解決し、最終的に <b>multi-user.target</b>（「ログインしてマルチユーザーで使える状態」を表すターゲット）に到達することだ。
+      また「今すぐ起動する」と「次回起動時から自動的に立ち上げる」は別の概念だ。
+    </p>
+    <table>
+      <tr><th>コマンド</th><th>意味</th></tr>
+      <tr><td><code>systemctl start 名前</code></td><td>今すぐそのunitを起動する（再起動すると消える）</td></tr>
+      <tr><td><code>systemctl enable 名前</code></td><td>次回OS起動時から自動的に立ち上げるよう設定する（今すぐは起動しない）</td></tr>
+      <tr><td><code>systemctl status 名前</code></td><td>そのunitの現在の状態（active/failed、有効化されているか等）を確認する</td></tr>
+      <tr><td><code>journalctl -u 名前</code></td><td>そのunitに関するログ履歴を見る。failedの原因調査に使う</td></tr>
+    </table>
+    <p>
+      このゲームでは下の入力欄に本物に近いコマンドを打ち込んで操作する。ゴールは依存関係を正しい順番で解決し、最終的に <b>multi-user.target</b>（「ログインしてマルチユーザーで使える状態」を表すターゲット）に到達することだ。
     </p>
     <button onclick="document.getElementById('introModal').style.display='none'">はじめる</button>
   </div>
@@ -241,17 +278,22 @@
 <div id="app">
   <h1>systemd 起動パズル</h1>
   <div id="subtitle">
-    ユニットをクリックして起動する。依存ユニット（Requires/After相当）が先に active になっていないと起動は failed になる。<br>
-    すべてのユニットを正しい順序で起動し、<b>multi-user.target</b> に到達せよ。
-    各カードの<b>?</b>アイコンをクリックするとそのunitの解説が見られる。
+    下の入力欄に <code>systemctl start 名前</code> のような本物のコマンドを打って操作する（カードクリックでも起動できる）。<br>
+    <code>Requires</code> の依存先が active でないと起動は failed になる。<code>Wants</code> の依存先は無くても起動できる（柔らかい依存）。<br>
+    すべてのユニットを起動し、<b>multi-user.target</b> に到達せよ。各カードの<b>?</b>アイコンで解説が見られる。
   </div>
   <div id="board"></div>
+  <div id="cmdBar">
+    <input id="cmdInput" type="text" placeholder="例: systemctl start sysinit.target" autocomplete="off">
+    <button onclick="runCommand()">実行</button>
+  </div>
   <div id="controls">
     <button onclick="resetGame()">リセット</button>
     <button class="glossaryBtn" onclick="document.getElementById('introModal').style.display='flex'">用語の解説を見る</button>
     <span id="status"></span>
   </div>
   <div id="log"></div>
+  <div id="hint">使えるコマンド: <code>systemctl start|stop|enable|disable|status &lt;名前&gt;</code> / <code>journalctl -u &lt;名前&gt;</code></div>
 </div>
 
 <script>
@@ -310,17 +352,29 @@ const units = {
       "「ログイン可能で、複数ユーザーが使えるサーバーとして稼働している」状態を表す最終的な節目。サーバーOSが \"起動完了\" とみなす基準になることが多い。<br><br>" +
       "依存: <code>basic.target</code>, <code>sshd.service</code>, <code>nginx.service</code>。これら全部が active でないと到達できない。"
   },
+  "cron.service": {
+    deps: ["sysinit.target"], wants: ["network.target"], desc: "定期実行デーモン。networkはWants（柔らかい依存）",
+    explain: "種類: service<br><br>" +
+      "決まった時刻に決まったコマンドを自動実行するデーモン。ネットワーク経由の処理を行うジョブもあるので network.target を起動したいが、ネットワークが無くてもローカルなジョブは実行できるので止まる理由にはならない。<br><br>" +
+      "依存: <code>sysinit.target</code>（Requires）, <code>network.target</code>（<b>Wants</b>）。Wantsなので network.target が未起動でも cron.service は <b>active</b> になる（ログに警告が出るだけ）。試しに network.target を起動せずに cron.service を起動してみよう。"
+  },
 };
 
+Object.values(units).forEach(u => { if (!u.wants) u.wants = []; });
+
 let state = {};
+let enabled = {};
+let journal = {};
 
 function resetGame() {
   state = {};
-  Object.keys(units).forEach(u => state[u] = "inactive");
+  enabled = {};
+  journal = {};
+  Object.keys(units).forEach(u => { state[u] = "inactive"; enabled[u] = false; journal[u] = []; });
   document.getElementById("log").innerHTML = "";
   document.getElementById("status").classList.remove("win");
   render();
-  log("システム停止状態。ユニットをクリックして起動を開始してください。");
+  log("システム停止状態。コマンド入力欄に systemctl start sysinit.target のように打ち込んで操作してください。");
 }
 
 function log(msg, cls) {
@@ -332,20 +386,113 @@ function log(msg, cls) {
   el.scrollTop = el.scrollHeight;
 }
 
+function recordJournal(name, msg) {
+  if (!journal[name]) journal[name] = [];
+  journal[name].push(msg);
+}
+
 function tryStart(name) {
-  if (state[name] === "active") return;
+  if (!units[name]) {
+    log(`Unit ${name} not found.`, "fail");
+    return;
+  }
+  if (state[name] === "active") {
+    log(`${name} は既に active です。`);
+    return;
+  }
   const u = units[name];
   const unmet = u.deps.filter(d => state[d] !== "active");
   if (unmet.length > 0) {
     state[name] = "failed";
-    log(`[FAILED] ${name} 起動失敗: 依存ユニット未起動 (${unmet.join(", ")})`, "fail");
+    const msg = `Job for ${name} failed because the dependent unit(s) failed: ${unmet.join(", ")}.`;
+    log(`[FAILED] ${msg}`, "fail");
+    recordJournal(name, msg);
   } else {
     state[name] = "active";
-    log(`[ OK ] ${name} を起動しました — ${u.desc}`, "ok");
+    let msg = `Started ${name} — ${u.desc}`;
+    const missingWants = u.wants.filter(w => state[w] !== "active");
+    if (missingWants.length > 0) {
+      log(`[ OK ] ${msg}`, "ok");
+      const warn = `${name}: の Wants 対象 ${missingWants.join(", ")} は起動していないが、Wantsは柔らかい依存なので起動は継続される。`;
+      log(`[WARN] ${warn}`);
+      recordJournal(name, msg);
+      recordJournal(name, warn);
+    } else {
+      log(`[ OK ] ${msg}`, "ok");
+      recordJournal(name, msg);
+    }
   }
   render();
   checkWin();
 }
+
+function tryStop(name) {
+  if (!units[name]) { log(`Unit ${name} not found.`, "fail"); return; }
+  state[name] = "inactive";
+  const msg = `Stopped ${name}.`;
+  log(`[ OK ] ${msg}`);
+  recordJournal(name, msg);
+  render();
+  checkWin();
+}
+
+function setEnabled(name, val) {
+  if (!units[name]) { log(`Unit ${name} not found.`, "fail"); return; }
+  enabled[name] = val;
+  const msg = val
+    ? `Created symlink for ${name} — 次回起動時から自動的に開始されるようになった（今はまだ start していないので状態は変わらない）`
+    : `Removed symlink for ${name} — 次回起動時の自動開始は解除された`;
+  log(`[ OK ] ${msg}`);
+  recordJournal(name, msg);
+  render();
+}
+
+function showStatus(name) {
+  if (!units[name]) { log(`Unit ${name} not found.`, "fail"); return; }
+  const u = units[name];
+  log(`● ${name} - ${u.desc}`);
+  log(`   Loaded: loaded (enabled: ${enabled[name] ? "yes" : "no"})`);
+  log(`   Active: ${state[name]} ${state[name] === "active" ? "(running)" : state[name] === "failed" ? "(failed)" : "(dead)"}`);
+  log(`   Requires: ${u.deps.length ? u.deps.join(", ") : "none"}  Wants: ${u.wants.length ? u.wants.join(", ") : "none"}`);
+}
+
+function showJournal(name) {
+  if (!units[name]) { log(`Unit ${name} not found.`, "fail"); return; }
+  const entries = journal[name] || [];
+  if (entries.length === 0) {
+    log(`-- ${name} のログはまだありません --`);
+    return;
+  }
+  log(`-- journalctl -u ${name} --`);
+  entries.forEach(e => log(`  ${e}`));
+}
+
+function runCommand() {
+  const input = document.getElementById("cmdInput");
+  const raw = input.value.trim();
+  if (!raw) return;
+  log(`$ ${raw}`);
+  const parts = raw.split(/\s+/);
+  if (parts[0] === "systemctl" && parts.length >= 3) {
+    const action = parts[1];
+    const name = parts[2];
+    if (action === "start") tryStart(name);
+    else if (action === "stop") tryStop(name);
+    else if (action === "enable") setEnabled(name, true);
+    else if (action === "disable") setEnabled(name, false);
+    else if (action === "status") showStatus(name);
+    else log(`不明なコマンドです: ${action}`, "fail");
+  } else if (parts[0] === "journalctl" && parts[1] === "-u" && parts[2]) {
+    showJournal(parts[2]);
+  } else {
+    log(`使い方: systemctl start|stop|enable|disable|status <名前> / journalctl -u <名前>`, "fail");
+  }
+  input.value = "";
+}
+
+document.getElementById("cmdInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") runCommand();
+});
 
 function checkWin() {
   const statusEl = document.getElementById("status");
@@ -372,8 +519,10 @@ function render() {
       <span class="infoIcon" onclick="event.stopPropagation(); showInfo('${name}')">?</span>
       <div class="name">${name}</div>
       <div class="badge ${st}">${st}</div>
+      ${enabled[name] ? '<span class="badge enabled-tag">enabled</span>' : ''}
       <div class="desc">${u.desc}</div>
-      <div class="deps">deps: ${u.deps.length ? u.deps.join(", ") : "なし"}</div>
+      <div class="deps">Requires: ${u.deps.length ? u.deps.join(", ") : "なし"}</div>
+      ${u.wants.length ? `<div class="deps">Wants: ${u.wants.join(", ")}</div>` : ''}
     `;
     board.appendChild(card);
   });
