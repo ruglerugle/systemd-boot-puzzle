@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>systemd 起動パズル</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d29;
+    --accent: #4fd1c5;
+    --ok: #4fd1c5;
+    --fail: #e0667a;
+    --inactive: #555a6e;
+    --text: #e6e6e6;
+    --text-dim: #9a9eb0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+  #app {
+    width: 100%;
+    max-width: 900px;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+    color: var(--accent);
+  }
+  #subtitle {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 640px) {
+    #board { grid-template-columns: repeat(2, 1fr); }
+  }
+  .card {
+    cursor: pointer;
+    border: 1px solid #2a2e3d;
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--panel);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    word-break: break-all;
+  }
+  .card .badge {
+    display: inline-block;
+    font-size: 11px;
+    border-radius: 4px;
+    padding: 1px 6px;
+    margin-bottom: 6px;
+  }
+  .card .badge.inactive { background: #2a2e3d; color: var(--inactive); }
+  .card .badge.active { background: #14332f; color: var(--ok); }
+  .card .badge.failed { background: #3a1f26; color: var(--fail); }
+  .card .desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    line-height: 1.4;
+  }
+  .card .deps {
+    font-size: 11px;
+    color: #6b6f82;
+  }
+  .card.active { border-color: var(--ok); background: #132723; }
+  .card.failed { border-color: var(--fail); background: #2a1820; }
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  button {
+    background: #232838;
+    color: var(--text);
+    border: 1px solid #3a3f54;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  #status {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  #status.win { color: var(--accent); font-weight: 600; }
+  #log {
+    background: #0a0b10;
+    border: 1px solid #2a2e3d;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+  #log .ok { color: var(--ok); }
+  #log .fail { color: var(--fail); }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>systemd 起動パズル</h1>
+  <div id="subtitle">
+    ユニットをクリックして起動する。依存ユニット（Requires/After相当）が先に active になっていないと起動は failed になる。<br>
+    すべてのユニットを正しい順序で起動し、<b>multi-user.target</b> に到達せよ。
+  </div>
+  <div id="board"></div>
+  <div id="controls">
+    <button onclick="resetGame()">リセット</button>
+    <span id="status"></span>
+  </div>
+  <div id="log"></div>
+</div>
+
+<script>
+const units = {
+  "sysinit.target":    { deps: [], desc: "基本初期化が完了したことを示すターゲット" },
+  "local-fs.target":   { deps: ["sysinit.target"], desc: "ローカルファイルシステムのマウント完了" },
+  "network.target":    { deps: ["sysinit.target"], desc: "ネットワーク設定の完了" },
+  "udev.service":      { deps: ["sysinit.target"], desc: "デバイス管理デーモン" },
+  "mysql.service":     { deps: ["local-fs.target"], desc: "DBサーバー。local-fs.targetが必要" },
+  "sshd.service":      { deps: ["network.target"], desc: "SSHデーモン。network.targetが必要" },
+  "nginx.service":     { deps: ["network.target", "mysql.service"], desc: "Webサーバー。networkとDBが必要" },
+  "basic.target":      { deps: ["sysinit.target", "local-fs.target"], desc: "基本ターゲット" },
+  "multi-user.target": { deps: ["basic.target", "sshd.service", "nginx.service"], desc: "最終目標" },
+};
+
+let state = {};
+
+function resetGame() {
+  state = {};
+  Object.keys(units).forEach(u => state[u] = "inactive");
+  document.getElementById("log").innerHTML = "";
+  document.getElementById("status").classList.remove("win");
+  render();
+  log("システム停止状態。ユニットをクリックして起動を開始してください。");
+}
+
+function log(msg, cls) {
+  const el = document.getElementById("log");
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function tryStart(name) {
+  if (state[name] === "active") return;
+  const u = units[name];
+  const unmet = u.deps.filter(d => state[d] !== "active");
+  if (unmet.length > 0) {
+    state[name] = "failed";
+    log(`[FAILED] ${name} 起動失敗: 依存ユニット未起動 (${unmet.join(", ")})`, "fail");
+  } else {
+    state[name] = "active";
+    log(`[ OK ] ${name} を起動しました — ${u.desc}`, "ok");
+  }
+  render();
+  checkWin();
+}
+
+function checkWin() {
+  const statusEl = document.getElementById("status");
+  if (state["multi-user.target"] === "active") {
+    statusEl.textContent = "達成! multi-user.target に到達しました。";
+    statusEl.classList.add("win");
+  } else {
+    const remain = Object.keys(units).filter(u => state[u] !== "active").length;
+    statusEl.textContent = `未起動ユニット: ${remain}`;
+    statusEl.classList.remove("win");
+  }
+}
+
+function render() {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  Object.keys(units).forEach(name => {
+    const u = units[name];
+    const st = state[name];
+    const card = document.createElement("div");
+    card.className = "card" + (st === "active" ? " active" : st === "failed" ? " failed" : "");
+    card.onclick = () => tryStart(name);
+    card.innerHTML = `
+      <div class="name">${name}</div>
+      <div class="badge ${st}">${st}</div>
+      <div class="desc">${u.desc}</div>
+      <div class="deps">deps: ${u.deps.length ? u.deps.join(", ") : "なし"}</div>
+    `;
+    board.appendChild(card);
+  });
+}
+
+resetGame();
+</script>
+</body>
+</html>
