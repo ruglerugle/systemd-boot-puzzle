@@ -123,18 +123,132 @@
   }
   #log .ok { color: var(--ok); }
   #log .fail { color: var(--fail); }
+
+  #introModal, #infoModal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+  }
+  #introModal .box, #infoModal .box {
+    background: var(--panel);
+    border: 1px solid #3a3f54;
+    border-radius: 10px;
+    padding: 24px 28px;
+    max-width: 560px;
+    max-height: 85vh;
+    overflow-y: auto;
+    line-height: 1.8;
+    font-size: 14px;
+  }
+  #introModal h2, #infoModal h2 { margin-top: 0; color: var(--accent); }
+  #introModal .box button, #infoModal .box button.close {
+    margin-top: 16px;
+    padding: 8px 20px;
+    background: var(--accent);
+    color: #06201d;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #introModal table, #infoModal table {
+    border-collapse: collapse;
+    margin: 10px 0;
+    width: 100%;
+    font-size: 13px;
+  }
+  #introModal th, #introModal td, #infoModal th, #infoModal td {
+    border: 1px solid #3a3f54;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  #introModal th, #infoModal th { background: #20232f; }
+  .glossaryBtn {
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: #1c2a28;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 12.5px;
+  }
+  .glossaryBtn:hover { background: #233834; }
+  .card .infoIcon {
+    cursor: pointer;
+    float: right;
+    font-size: 11px;
+    color: var(--text-dim);
+    border: 1px solid #3a3f54;
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    text-align: center;
+    line-height: 16px;
+  }
 </style>
 </head>
 <body>
+
+<div id="introModal">
+  <div class="box">
+    <h2>systemd とは?</h2>
+    <p>
+      Linuxが起動するとき、OSはたくさんの「やること」を順番に立ち上げていく。たとえば「ファイルシステムをマウントする」「ネットワークに繋ぐ」「データベースを起動する」「Webサーバーを起動する」など。
+      これらの「やること」をひとつひとつ管理しているのが <b>systemd</b> というプログラムだ。
+    </p>
+    <p>各「やること」は <b>unit（ユニット）</b> という単位で管理される。主に2種類ある。</p>
+    <table>
+      <tr><th>種類</th><th>意味</th></tr>
+      <tr><td><code>.service</code></td><td>実際に動くプログラム（例: sshd, nginx, mysql）</td></tr>
+      <tr><td><code>.target</code></td><td>複数のunitをまとめた「節目」「グループ名」。プログラムそのものは動かさない</td></tr>
+    </table>
+    <p>
+      重要なのは「順番」だ。例えばWebサーバー(nginx)はデータベース(mysql)より先に起動しても意味がない（DBに繋がらず動かない）。
+      そこでunitは他のunitに対して <b>依存関係</b> を宣言する。
+    </p>
+    <table>
+      <tr><th>依存の種類</th><th>意味</th></tr>
+      <tr><td><code>Requires</code></td><td>このunitが動くには、依存先unitが必ず起動済みでなければならない</td></tr>
+      <tr><td><code>After</code></td><td>依存先unitの後に起動する、という順序だけの指定</td></tr>
+    </table>
+    <p>
+      このゲームでは依存先が <b>active（起動済み）</b> になっていないunitを起動しようとすると <b>failed（失敗）</b> になる。
+      これは実際のLinuxでも起きる現象で、<code>systemctl status ユニット名</code> や <code>journalctl -u ユニット名</code> で原因を調べる。
+      下のログ表示は journalctl の出力を模したものだ。
+    </p>
+    <p>
+      ゴールは依存関係を正しい順番で解決し、最終的に <b>multi-user.target</b>（「ログインしてマルチユーザーで使える状態」を表すターゲット）に到達することだ。
+    </p>
+    <button onclick="document.getElementById('introModal').style.display='none'">はじめる</button>
+  </div>
+</div>
+
+<div id="infoModal" style="display:none">
+  <div class="box">
+    <h2 id="infoTitle"></h2>
+    <div id="infoBody"></div>
+    <button class="close" onclick="document.getElementById('infoModal').style.display='none'">閉じる</button>
+  </div>
+</div>
+
 <div id="app">
   <h1>systemd 起動パズル</h1>
   <div id="subtitle">
     ユニットをクリックして起動する。依存ユニット（Requires/After相当）が先に active になっていないと起動は failed になる。<br>
     すべてのユニットを正しい順序で起動し、<b>multi-user.target</b> に到達せよ。
+    各カードの<b>?</b>アイコンをクリックするとそのunitの解説が見られる。
   </div>
   <div id="board"></div>
   <div id="controls">
     <button onclick="resetGame()">リセット</button>
+    <button class="glossaryBtn" onclick="document.getElementById('introModal').style.display='flex'">用語の解説を見る</button>
     <span id="status"></span>
   </div>
   <div id="log"></div>
@@ -142,15 +256,60 @@
 
 <script>
 const units = {
-  "sysinit.target":    { deps: [], desc: "基本初期化が完了したことを示すターゲット" },
-  "local-fs.target":   { deps: ["sysinit.target"], desc: "ローカルファイルシステムのマウント完了" },
-  "network.target":    { deps: ["sysinit.target"], desc: "ネットワーク設定の完了" },
-  "udev.service":      { deps: ["sysinit.target"], desc: "デバイス管理デーモン" },
-  "mysql.service":     { deps: ["local-fs.target"], desc: "DBサーバー。local-fs.targetが必要" },
-  "sshd.service":      { deps: ["network.target"], desc: "SSHデーモン。network.targetが必要" },
-  "nginx.service":     { deps: ["network.target", "mysql.service"], desc: "Webサーバー。networkとDBが必要" },
-  "basic.target":      { deps: ["sysinit.target", "local-fs.target"], desc: "基本ターゲット" },
-  "multi-user.target": { deps: ["basic.target", "sshd.service", "nginx.service"], desc: "最終目標" },
+  "sysinit.target": {
+    deps: [], desc: "基本初期化が完了したことを示すターゲット",
+    explain: "種類: target（マイルストーン、プログラムは動かない）<br><br>" +
+      "起動シーケンスの一番最初の節目。CPUやメモリの基本認識、カーネルレベルの初期セットアップが終わった状態を示す。<br><br>" +
+      "依存: なし。これがゲーム内で最初に起動できるunit。"
+  },
+  "local-fs.target": {
+    deps: ["sysinit.target"], desc: "ローカルファイルシステムのマウント完了",
+    explain: "種類: target<br><br>" +
+      "/, /home, /var など、ローカルディスク上のファイルシステムが全てマウントされた状態を示す節目。<br><br>" +
+      "依存: <code>sysinit.target</code>（After）。基本初期化が終わっていないとディスクをマウントする準備ができないため。"
+  },
+  "network.target": {
+    deps: ["sysinit.target"], desc: "ネットワーク設定の完了",
+    explain: "種類: target<br><br>" +
+      "ネットワークインターフェースの設定が完了し、外部と通信できる状態になったことを示す節目。<br><br>" +
+      "依存: <code>sysinit.target</code>（After）。"
+  },
+  "udev.service": {
+    deps: ["sysinit.target"], desc: "デバイス管理デーモン",
+    explain: "種類: service（実際に動くプログラム）<br><br>" +
+      "USBメモリやディスクなどのハードウェアが繋がった/外れたことを検知し、デバイスファイルを管理するデーモン。<br><br>" +
+      "依存: <code>sysinit.target</code>（After）。"
+  },
+  "mysql.service": {
+    deps: ["local-fs.target"], desc: "DBサーバー。local-fs.targetが必要",
+    explain: "種類: service<br><br>" +
+      "データベースサーバー。データはディスク上のファイルに保存されているため、ディスクがマウントされていないと起動できない。<br><br>" +
+      "依存: <code>local-fs.target</code>（Requires）。これがないと \"データの保存場所が無い\" 状態で起動を試みることになり失敗する。"
+  },
+  "sshd.service": {
+    deps: ["network.target"], desc: "SSHデーモン。network.targetが必要",
+    explain: "種類: service<br><br>" +
+      "遠隔からログインするためのSSHサーバー。ネットワーク越しの接続を受け付けるプログラムなので、ネットワークが使える状態でなければ意味がない。<br><br>" +
+      "依存: <code>network.target</code>（Requires/After）。"
+  },
+  "nginx.service": {
+    deps: ["network.target", "mysql.service"], desc: "Webサーバー。networkとDBが必要",
+    explain: "種類: service<br><br>" +
+      "Webサーバー。外部からのHTTPリクエストを受けるのでネットワークが必要、かつ多くのWebアプリはDBからデータを取得するので mysql.service も必要になる。<br><br>" +
+      "依存: <code>network.target</code> と <code>mysql.service</code>（両方Requires）。片方でも先に起動していないと failed になる。"
+  },
+  "basic.target": {
+    deps: ["sysinit.target", "local-fs.target"], desc: "基本ターゲット",
+    explain: "種類: target<br><br>" +
+      "OSとしての基本機能（初期化＋ファイルシステム）が揃った状態を示す節目。多くのサービスがこのtargetの後に起動する設計になっている。<br><br>" +
+      "依存: <code>sysinit.target</code>, <code>local-fs.target</code>。"
+  },
+  "multi-user.target": {
+    deps: ["basic.target", "sshd.service", "nginx.service"], desc: "最終目標",
+    explain: "種類: target<br><br>" +
+      "「ログイン可能で、複数ユーザーが使えるサーバーとして稼働している」状態を表す最終的な節目。サーバーOSが \"起動完了\" とみなす基準になることが多い。<br><br>" +
+      "依存: <code>basic.target</code>, <code>sshd.service</code>, <code>nginx.service</code>。これら全部が active でないと到達できない。"
+  },
 };
 
 let state = {};
@@ -210,6 +369,7 @@ function render() {
     card.className = "card" + (st === "active" ? " active" : st === "failed" ? " failed" : "");
     card.onclick = () => tryStart(name);
     card.innerHTML = `
+      <span class="infoIcon" onclick="event.stopPropagation(); showInfo('${name}')">?</span>
       <div class="name">${name}</div>
       <div class="badge ${st}">${st}</div>
       <div class="desc">${u.desc}</div>
@@ -217,6 +377,13 @@ function render() {
     `;
     board.appendChild(card);
   });
+}
+
+function showInfo(name) {
+  const u = units[name];
+  document.getElementById("infoTitle").textContent = name;
+  document.getElementById("infoBody").innerHTML = u.explain;
+  document.getElementById("infoModal").style.display = "flex";
 }
 
 resetGame();
